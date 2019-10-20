@@ -1,12 +1,16 @@
 package logica;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.security.MessageDigest;
 import java.time.LocalTime;
@@ -39,11 +43,11 @@ public class Cliente {
 	
 	private String log;
 	
-	private Socket socket;
+	private DatagramSocket socket;
 	
-	private PrintWriter out;
+	private InetAddress address;
 	
-	private BufferedReader in;
+	private byte[] buf;
 
 	private InterfazCliente interfaz;
 	
@@ -68,22 +72,27 @@ public class Cliente {
 //		log = "";
 //		escribirEnLog("Cliente inicializado, conectando con el servidor . . .\n");
 		log = "[" + LocalTime.now() + "]" + INICIO + "Cliente inicializado, conectando con el servidor . . .\n";
-		socket = new Socket(SERVIDOR, PUERTO);
+		socket = new DatagramSocket();
+		address = InetAddress.getByName(SERVIDOR);
 //		escribirEnLog("Conexión exitosa con el servidor " + SERVIDOR + ":" + PUERTO);
 		log += "[" + LocalTime.now() + "]" + INICIO + "Conexión exitosa con el servidor " + SERVIDOR + ":" + PUERTO;
-		in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-		out = new PrintWriter(socket.getOutputStream(), true);
 		estado = BIEN;
 	}
 	
 	public int comunicarse() throws Exception {
 		try {
 			escribirEnLog("Enviando mensaje de " + PREPARADO + " al servidor");
-			out.println(PREPARADO);
+			
+			buf = PREPARADO.getBytes();
+			DatagramPacket packet = new DatagramPacket(buf, buf.length, address, PUERTO);
+			socket.send(packet);
+			
 			escribirEnLog("Mensaje enviado al servidor");
 			
 			// Esperando la recepción del nombre del archivo a descargar
-			String nombre = in.readLine();
+			packet = new DatagramPacket(buf, buf.length);
+			socket.receive(packet);
+			String nombre = new String(packet.getData(), 0, packet.getLength());
 
 			System.out.println("ACA ALGO1");
 			if(nombre.contains(NOMBRE)) {
@@ -100,12 +109,11 @@ public class Cliente {
 			// Iniciando recepción y escritura del archivo
 			String rutaDesc = RUTA_DOWN + nombreArchivo;
 			escribirEnLog("Iniciando recepción y escribiendo el archivo en la ruta " + rutaDesc + " . . .");
-			DataInputStream dis = new DataInputStream(socket.getInputStream());
+
 			File f = new File(rutaDesc);
 			FileOutputStream fos = new FileOutputStream(f);
 			if(!f.exists())
 				f.createNewFile();
-			byte[] buffer = new byte[8192];
 			MessageDigest hashing = MessageDigest.getInstance("SHA-256");
 			
 
@@ -113,19 +121,25 @@ public class Cliente {
 			
 			// Contabilizando el tiempo inicial
 			long ini = System.currentTimeMillis();
-			int r;
 			
 			// Recibiendo paquetes del archivo a descargar
-			long tamTotal = dis.readLong();
+			buf = new byte[32768];
+			packet = new DatagramPacket(buf, buf.length);
+			socket.receive(packet);
+			Long tamTotal = Long.parseLong(new String(packet.getData(), 0, packet.getLength()));
+			
+			
 			System.out.println(tamTotal);
-			while (tam < tamTotal && (r = dis.read(buffer)) != -1 ) 
+			while (tam < tamTotal) 
 			{
-				out.println(LLEGO);
-				fos.write(buffer, 0, r);
-				hashing.update(buffer, 0, r);
+				packet = new DatagramPacket(buf, buf.length);
+				socket.receive(packet);
+				if(packet.getData() == null || packet.getData().length == 0) break;
+				fos.write(packet.getData(), 0, packet.getLength());
+				hashing.update(packet.getData(), 0, packet.getLength());
 				numPaquetes++;
-				tam += (r);
-				escribirEnLog("Paquete Recibido! tamaño: " + (r) + " bytes");
+				tam += (packet.getLength());
+				escribirEnLog("Paquete Recibido! tamaño: " + (packet.getLength()) + " bytes");
 			}
 			fos.flush(); // Por si acaso algo queda en el buffer de escritura
 			fos.close();
@@ -141,7 +155,7 @@ public class Cliente {
 			
 			// Guardando el archivo en local
 //			createFile(rutaDesc);
-			out.println("FIN");
+			
 			// Verificación de integridad con el hash
 //			BufferedInputStream bis = new BufferedInputStream(new FileInputStream(rutaDesc));
 //			byte[] completo = new byte[(int)(new File(rutaDesc)).length()];
@@ -150,7 +164,9 @@ public class Cliente {
 			
 			escribirEnLog("Iniciando la Validación de integridad . . . ");
 //			String hash = new String(blob);
-			String hash = in.readLine();
+			packet = new DatagramPacket(buf, buf.length);
+			socket.receive(packet);
+			String hash = new String(packet.getData(), 0, packet.getLength());
 			System.out.println("///");
 			if(hash.contains(FINARCH)) 
 			{
@@ -169,22 +185,24 @@ public class Cliente {
 				if(created.equals(h)) {
 					escribirEnLog("El Archivo se verificó y ESTÁ ÍNTEGRO ! :D");
 					escribirEnLog("Se le envía al servidor confirmación: " + RECIBIDO);
-					out.println(RECIBIDO);
+					buf = RECIBIDO.getBytes();
+					packet = new DatagramPacket(buf, buf.length, address, PUERTO);
+					socket.send(packet);
 					// Cierre de los canales
 					escribirEnLog("Mensaje de confimación exitosa enviado correctamente :D !");
 					escribirEnLog("Cerrando conexión satisfactoriamente . . .");
-					dis.close();
 					cerrar();
 				}
 				else {
 					estado = MAL;
 					escribirEnLog("El archivo SE CORROMPIÓ :( tiene errores porque los hashes no coinciden");
 					escribirEnLog("Se le envía al servidor mensaje de error: " + ERROR);
-					out.println(ERROR);
+					buf = ERROR.getBytes();
+					packet = new DatagramPacket(buf, buf.length, address, PUERTO);
+					socket.send(packet);
 					// Cierre de los canales
 					escribirEnLog("Mensaje de error enviado correctamente :(");
 					escribirEnLog("Cerrando conexión por finalización de proceso erróneo :( . . .");
-					dis.close();
 					cerrar();
 				}
 			}
@@ -192,7 +210,6 @@ public class Cliente {
 			{
 				estado = MAL;
 				escribirEnLog("ERROR :: Llegó un mensaje que no debía llegar " + hash);
-				dis.close();
 				cerrar();
 			}
 		}
@@ -240,8 +257,6 @@ public class Cliente {
 	    fos.close();
 		escribirEnLog("Log generado ! Hasta la próxima :D !");
 		// Posteriormente se cierran los canales 
-	    in.close();
-		out.close();
 		socket.close();
 	}
 }
