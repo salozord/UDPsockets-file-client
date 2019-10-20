@@ -89,12 +89,13 @@ public class Cliente {
 			
 			escribirEnLog("Mensaje enviado al servidor");
 			
+			buf= new byte[200];
 			// Esperando la recepción del nombre del archivo a descargar
 			packet = new DatagramPacket(buf, buf.length);
 			socket.receive(packet);
 			String nombre = new String(packet.getData(), 0, packet.getLength());
-
-			System.out.println("ACA ALGO1");
+			
+			System.out.println(nombre);
 			if(nombre.contains(NOMBRE)) {
 				String n = nombre.replace(NOMBRE, "");
 				nombreArchivo = n;
@@ -128,19 +129,24 @@ public class Cliente {
 			socket.receive(packet);
 			Long tamTotal = Long.parseLong(new String(packet.getData(), 0, packet.getLength()));
 			
-			
 			System.out.println(tamTotal);
-			while (tam < tamTotal) 
+			String hash = "";
+			
+			while (numPaquetes<tamTotal) 
 			{
 				packet = new DatagramPacket(buf, buf.length);
 				socket.receive(packet);
-				if(packet.getData() == null || packet.getData().length == 0) break;
-				fos.write(packet.getData(), 0, packet.getLength());
-				hashing.update(packet.getData(), 0, packet.getLength());
+				hash = new String(packet.getData(), 0, packet.getLength());
+				if(hash.contains(FINARCH)) break;
 				numPaquetes++;
-				tam += (packet.getLength());
-				escribirEnLog("Paquete Recibido! tamaño: " + (packet.getLength()) + " bytes");
+				
+				fos.write(packet.getData(), 0, packet.getData().length);
+				hashing.update(packet.getData(), 0, packet.getLength());
+				tam += (packet.getData().length);
+				escribirEnLog("Paquete Recibido! tamaño: " + (packet.getData().length) + " bytes");
 			}
+			System.out.println(numPaquetes);
+			
 			fos.flush(); // Por si acaso algo queda en el buffer de escritura
 			fos.close();
 			
@@ -164,10 +170,8 @@ public class Cliente {
 			
 			escribirEnLog("Iniciando la Validación de integridad . . . ");
 //			String hash = new String(blob);
-			packet = new DatagramPacket(buf, buf.length);
-			socket.receive(packet);
-			String hash = new String(packet.getData(), 0, packet.getLength());
-			System.out.println("///");
+			
+			System.out.println(hash);
 			if(hash.contains(FINARCH)) 
 			{
 				
